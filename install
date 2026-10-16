@@ -3,7 +3,7 @@
 # Usage: curl -fsSL https://raw.githubusercontent.com/blackhat-7/maintainer/main/install | bash
 set -euo pipefail
 
-VERSION=v0.1.7
+VERSION=v0.1.8
 RAW=https://raw.githubusercontent.com/blackhat-7/maintainer/$VERSION/template
 FILES=(
   .github/workflows/maintainer.yml
@@ -33,9 +33,14 @@ for f in "${FILES[@]}"; do
   mkdir -p "$(dirname "$f")"
   curl -fsSL "$RAW/$f" | sed "s/__VERSION__/$VERSION/" > "$f"
 done
+# pi and other Agent Skills tools read skills from .agents/skills.
+mkdir -p .agents/skills/open-pr
+cp .claude/skills/open-pr/SKILL.md .agents/skills/open-pr/SKILL.md
 
 block CLAUDE.md '<!-- maintainer:start -->' '<!-- maintainer:end -->' '@.maintainer/STANDARDS.md'
-block AGENTS.md '<!-- maintainer:start -->' '<!-- maintainer:end -->' 'Follow `.maintainer/STANDARDS.md`.'
+block AGENTS.md '<!-- maintainer:start -->' '<!-- maintainer:end -->' \
+  'Read `.maintainer/STANDARDS.md` before changing anything, and follow it.
+Open PRs as drafts (`gh pr create --draft`). Run `gh pr ready` only when done: every push to a ready PR triggers a review.'
 
 # GitHub reads the first CODEOWNERS it finds, so extend that one.
 owners=.github/CODEOWNERS
@@ -45,6 +50,7 @@ done
 block "$owners" '# maintainer:start' '# maintainer:end' \
   "/.github/ @$me
 /.claude/ @$me
+/.agents/ @$me
 /.maintainer/ @$me"
 
 gh repo edit "$repo" --enable-auto-merge > /dev/null || warn "could not enable auto-merge"

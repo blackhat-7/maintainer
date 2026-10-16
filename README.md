@@ -29,9 +29,9 @@ Rerun the install command. It overwrites the managed files and leaves the rest o
 | `.github/workflows/maintainer.yml` | Reviews each PR and runs the daily stale check. Pinned to a release of this repo. |
 | `.github/pull_request_template.md` | What / Why / Testing. |
 | `.maintainer/` | Standards and review rules. Edit the review rules here to tune the reviewer. |
-| `.claude/skills/open-pr/` | Self-review and open a PR in the right format. |
+| `.claude/skills/open-pr/`, `.agents/skills/open-pr/` | Self-review and open a draft PR in the right format. Claude Code reads the first, pi and other Agent Skills tools the second. |
 | `CLAUDE.md`, `AGENTS.md`, `CODEOWNERS` | A marked block. Your own content is kept. |
-| Repo settings | Auto-merge on. Actions may approve PRs. `changes-requested` and `needs-maintainer` labels. A `maintainer` ruleset: PRs need one approval, plus yours for `.github/`, `.claude/` and `.maintainer/`. Admins can bypass. |
+| Repo settings | Auto-merge on. Actions may approve PRs. `changes-requested` and `needs-maintainer` labels. A `maintainer` ruleset: PRs need one approval, plus yours for `.github/`, `.claude/`, `.agents/` and `.maintainer/`. Admins can bypass. |
 
 Make your CI a required status check in the ruleset, so auto-merge waits for it.
 
@@ -42,7 +42,7 @@ PRs are untrusted, including ones from forks. The review never runs PR code. Cla
 Limits that a prompt injection can't get past:
 
 - PRs from outsiders are never auto-merged.
-- Changes to `.github/`, `.claude/` or `.maintainer/` by anyone but the owner are rejected before Claude sees them.
+- Changes to `.github/`, `.claude/`, `.agents/` or `.maintainer/` by anyone but the owner are rejected before Claude sees them.
 - The merge is pinned to the reviewed commit.
 
 Limits, checked before Claude runs so they cost nothing:

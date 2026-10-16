@@ -74,8 +74,8 @@ jobs:
               gh pr edit "$PR" --add-label needs-maintainer
               gh pr comment "$PR" --body 'This PR reached the limit of 10 automated reviews. A maintainer will take it from here.'
             fi
-          elif [ "$ASSOC" != OWNER ] && git diff --name-only "$base...$head" | grep -qE '^\.(github|claude|maintainer)/'; then
-            verdict request_changes 'Changes to `.github/`, `.claude/` and `.maintainer/` are maintainer-only. Remove them from this PR.'
+          elif [ "$ASSOC" != OWNER ] && git diff --name-only "$base...$head" | grep -qE '^\.(github|claude|agents|maintainer)/'; then
+            verdict request_changes 'Changes to `.github/`, `.claude/`, `.agents/` and `.maintainer/` are maintainer-only. Remove them from this PR.'
           elif ! $trusted && [ "$open" -gt 3 ]; then
             verdict close "You have $open open PRs here. Get those merged or closed before opening more."
           elif [ "$lines" -gt "$max_lines" ]; then
