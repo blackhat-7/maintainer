@@ -3,7 +3,7 @@
 A strict Claude maintainer for any GitHub repo. One command to install, the same command to update.
 
 - **Standards** for every AI and human working on the repo (`.maintainer/STANDARDS.md`), loaded through `CLAUDE.md` and `AGENTS.md`.
-- **PR review** on every PR, run on your Claude subscription. Claude reads the change like a principal engineer. It closes unwanted ideas at once, requests changes on fixable ones, and approves the rest. Approved PRs from collaborators auto-merge. PRs left with changes requested close after 21 idle days.
+- **PR review** on every PR, run on your Claude subscription. Claude reads the change like a principal engineer. It closes unwanted ideas at once, requests changes on fixable ones, and approves the rest. Approved PRs from collaborators auto-merge. PRs left with changes requested close after 21 idle days. Drafts are not reviewed, so open PRs as drafts and mark them ready when done.
 - **PR template** and an `open-pr` skill, so AI-written PRs arrive in the right format.
 
 ## Install
@@ -50,7 +50,7 @@ Limits, checked before Claude runs so they cost nothing:
 | | Outsiders | Collaborators | Owner |
 |---|---|---|---|
 | Changed lines (lockfiles excluded) | 1,500 | 5,000 | 5,000 |
-| Claude reviews per PR | 10 | 10 | no limit |
+| Claude reviews per PR | 10 | 10 | 10 |
 | Open PRs at once | 3 | no limit | no limit |
 
 ## Releasing

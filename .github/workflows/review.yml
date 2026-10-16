@@ -69,7 +69,7 @@ jobs:
           verdict() {
             jq -n --arg d "$1" --arg s "$2" '{decision: $d, summary: $s, comments: []}' > "$RUNNER_TEMP/verdict.json"
           }
-          if [ "$ASSOC" != OWNER ] && [ "$reviews" -ge 10 ]; then
+          if [ "$reviews" -ge 10 ]; then
             if ! gh pr view "$PR" --json labels -q '.labels[].name' | grep -qx needs-maintainer; then
               gh pr edit "$PR" --add-label needs-maintainer
               gh pr comment "$PR" --body 'This PR reached the limit of 10 automated reviews. A maintainer will take it from here.'
@@ -109,7 +109,7 @@ jobs:
           npm install -g --silent @anthropic-ai/claude-code@2.1.302
           # --restricted: no tools that run code; file tools confined to this directory.
           # --safe-mode: ignore the PR's own CLAUDE.md, settings, skills and hooks.
-          claude -p --restricted --safe-mode --tools Read,Grep,Glob \
+          claude -p --restricted --safe-mode --tools Read,Grep,Glob --model opus \
             --output-format json --json-schema "$SCHEMA" \
             'Review the pull request on stdin and give your verdict.' \
             < "$RUNNER_TEMP/input.md" > "$RUNNER_TEMP/out.json"
