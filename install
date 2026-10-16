@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Install or update maintainer in the current repo. Safe to rerun.
+# Usage: curl -fsSL https://raw.githubusercontent.com/blackhat-7/maintainer/main/install | bash
+set -euo pipefail
+
+VERSION=v0.1.0
+RAW=https://raw.githubusercontent.com/blackhat-7/maintainer/$VERSION/template
+FILES=(
+  .github/workflows/maintainer.yml
+  .github/pull_request_template.md
+  .maintainer/STANDARDS.md
+  .maintainer/REVIEW.md
+  .claude/skills/open-pr/SKILL.md
+)
+
+warn() { echo "warning: $*" >&2; }
+
+# Replace the lines between the start and end markers in a file, or append them.
+block() {
+  local file=$1 start=$2 end=$3 content=$4
+  mkdir -p "$(dirname "$file")"
+  touch "$file"
+  awk -v s="$start" -v e="$end" '$0 == s {skip = 1} !skip {print} $0 == e {skip = 0}' "$file" > "$file.tmp"
+  printf '%s\n%s\n%s\n' "$start" "$content" "$end" >> "$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+cd "$(git rev-parse --show-toplevel)"
+repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+me=$(gh api user -q .login)
+
+for f in "${FILES[@]}"; do
+  mkdir -p "$(dirname "$f")"
+  curl -fsSL "$RAW/$f" | sed "s/__VERSION__/$VERSION/" > "$f"
+done
+
+block CLAUDE.md '<!-- maintainer:start -->' '<!-- maintainer:end -->' '@.maintainer/STANDARDS.md'
+block AGENTS.md '<!-- maintainer:start -->' '<!-- maintainer:end -->' 'Follow `.maintainer/STANDARDS.md`.'
+
+# GitHub reads the first CODEOWNERS it finds, so extend that one.
+owners=.github/CODEOWNERS
+for f in .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS; do
+  if [ -f "$f" ]; then owners=$f; break; fi
+done
+block "$owners" '# maintainer:start' '# maintainer:end' \
+  "/.github/ @$me
+/.claude/ @$me
+/.maintainer/ @$me"
+
+gh repo edit "$repo" --enable-auto-merge > /dev/null || warn "could not enable auto-merge"
+gh label create changes-requested -R "$repo" --force --color d93f0b \
+  --description "Waiting on the author. Closed if inactive." > /dev/null || warn "could not create label"
+
+perms=$(gh api "repos/$repo/actions/permissions/workflow" -q .default_workflow_permissions) &&
+  gh api -X PUT "repos/$repo/actions/permissions/workflow" \
+    -f default_workflow_permissions="$perms" -F can_approve_pull_request_reviews=true ||
+  warn "could not allow GitHub Actions to approve pull requests"
+
+# PRs to the default branch need one approval, and code owner approval for protected
+# paths. Repo admins can bypass.
+ruleset='{
+  "name": "maintainer",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+  "bypass_actors": [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
+  "rules": [{"type": "pull_request", "parameters": {
+    "required_approving_review_count": 1,
+    "dismiss_stale_reviews_on_push": true,
+    "require_code_owner_review": true,
+    "require_last_push_approval": false,
+    "required_review_thread_resolution": false
+  }}]
+}'
+id=$(gh api "repos/$repo/rulesets" -q '.[] | select(.name == "maintainer" and .source_type == "Repository") | .id')
+if [ -n "$id" ]; then
+  gh api -X PUT "repos/$repo/rulesets/$id" --input - <<< "$ruleset" > /dev/null
+else
+  gh api -X POST "repos/$repo/rulesets" --input - <<< "$ruleset" > /dev/null
+fi || warn "could not create the branch ruleset (private repos need GitHub Pro)"
+
+if ! gh secret list -R "$repo" | grep -q '^CLAUDE_CODE_OAUTH_TOKEN\b'; then
+  warn "secret missing. Run: claude setup-token, then: gh secret set CLAUDE_CODE_OAUTH_TOKEN -R $repo"
+fi
+
+echo "Installed maintainer $VERSION. Review the changes, then commit and push them."

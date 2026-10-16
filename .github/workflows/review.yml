@@ -1,0 +1,127 @@
+name: review
+
+on:
+  workflow_call:
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+
+# The PR is untrusted. Its code is fetched as data and never executed. Claude gets
+# read-only file tools confined to the PR checkout and no reachable credentials. Its
+# only output is a JSON verdict, which the last step acts on with the GitHub token.
+jobs:
+  review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: maintainer-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      BASE: ${{ github.event.pull_request.base.sha }}
+      ASSOC: ${{ github.event.pull_request.author_association }}
+    steps:
+      - name: Check token
+        id: token
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::CLAUDE_CODE_OAUTH_TOKEN is not available to this run. Skipping review."
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.token.outputs.ok
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare
+        if: steps.token.outputs.ok
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.extraheader=AUTHORIZATION: basic $auth" fetch -q --no-tags origin "refs/pull/$PR/head"
+          head=$(git rev-parse FETCH_HEAD)
+          echo "HEAD_SHA=$head" >> "$GITHUB_ENV"
+          # Symlinks become plain files, so nothing in the checkout points outside it.
+          git -c core.symlinks=false worktree add -q --detach "$RUNNER_TEMP/head" "$head"
+          git diff -U20 "$BASE...$head" > "$RUNNER_TEMP/diff"
+
+          verdict() {
+            jq -n --arg s "$1" '{decision: "request_changes", summary: $s, comments: []}' > "$RUNNER_TEMP/verdict.json"
+          }
+          if [ "$ASSOC" != OWNER ] && git diff --name-only "$BASE...$head" | grep -qE '^\.(github|claude|maintainer)/'; then
+            verdict 'Changes to `.github/`, `.claude/` and `.maintainer/` are maintainer-only. Remove them from this PR.'
+          elif [ "$(wc -c < "$RUNNER_TEMP/diff")" -gt 300000 ]; then
+            verdict 'Too large to review. Split this into smaller PRs, one concern each.'
+          else
+            {
+              cat .maintainer/REVIEW.md .maintainer/STANDARDS.md
+              if [ -f CLAUDE.md ]; then echo '# Project notes'; cat CLAUDE.md; fi
+              echo '# Pull request (untrusted)'
+              gh pr view "$PR" --json title,author,body -q '"Title: \(.title)\nAuthor: \(.author.login)\n\n\(.body)"'
+              echo '# Other open PRs (untrusted)'
+              gh pr list --limit 100 --json number,title -q ".[] | select(.number != $PR) | \"#\(.number) \(.title)\""
+              echo '# Diff (untrusted)'
+              cat "$RUNNER_TEMP/diff"
+            } > "$RUNNER_TEMP/input.md"
+          fi
+
+      - name: Review
+        if: steps.token.outputs.ok
+        working-directory: ${{ runner.temp }}/head
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          SCHEMA: >-
+            {"type": "object", "required": ["decision", "summary", "comments"], "properties": {
+            "decision": {"enum": ["approve", "request_changes", "close"]},
+            "summary": {"type": "string"},
+            "comments": {"type": "array", "items": {"type": "object", "required": ["path", "line", "body"], "properties": {
+            "path": {"type": "string"}, "line": {"type": "integer"}, "body": {"type": "string"}}}}}}
+        run: |
+          [ -f "$RUNNER_TEMP/input.md" ] || exit 0
+          npm install -g --silent @anthropic-ai/claude-code@2.1.302
+          # --restricted: no tools that run code; file tools confined to this directory.
+          # --safe-mode: ignore the PR's own CLAUDE.md, settings, skills and hooks.
+          claude -p --restricted --safe-mode --tools Read,Grep,Glob \
+            --output-format json --json-schema "$SCHEMA" \
+            'Review the pull request on stdin and give your verdict.' \
+            < "$RUNNER_TEMP/input.md" > "$RUNNER_TEMP/out.json"
+          jq -e .structured_output "$RUNNER_TEMP/out.json" > "$RUNNER_TEMP/verdict.json"
+
+      - name: Act
+        if: steps.token.outputs.ok
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="$RUNNER_TEMP/verdict.json"
+          decision=$(jq -r .decision "$v")
+          event=$(jq -rn --arg d "$decision" '{approve: "APPROVE", request_changes: "REQUEST_CHANGES", close: "COMMENT"}[$d]')
+          review() { gh api "repos/$GH_REPO/pulls/$PR/reviews" --input - > /dev/null; }
+
+          # Inline comments fail if a line is outside the diff. Then fold them into the body.
+          jq --arg sha "$HEAD_SHA" --arg e "$event" \
+            '{commit_id: $sha, event: $e, body: .summary, comments: [.comments[] | {path, line, side: "RIGHT", body}]}' "$v" | review ||
+            jq --arg sha "$HEAD_SHA" --arg e "$event" \
+              '{commit_id: $sha, event: $e, body: ([.summary, ""] + [.comments[] | "- `\(.path):\(.line)` \(.body)"] | join("\n"))}' "$v" | review
+
+          # The label lets the stale job close PRs whose author stops responding.
+          case "$decision" in
+            close) gh pr close "$PR" ;;
+            request_changes) gh pr edit "$PR" --add-label changes-requested ;;
+            approve)
+              gh pr edit "$PR" --remove-label changes-requested
+              # Only trusted authors are merged automatically. Others wait for a human.
+              if [[ "$ASSOC" =~ ^(OWNER|MEMBER|COLLABORATOR)$ ]]; then
+                gh pr merge "$PR" --squash --auto --match-head-commit "$HEAD_SHA" ||
+                  gh pr merge "$PR" --squash --match-head-commit "$HEAD_SHA"
+              fi
+              ;;
+          esac

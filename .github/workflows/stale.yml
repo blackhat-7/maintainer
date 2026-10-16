@@ -1,0 +1,19 @@
+name: stale
+
+on:
+  workflow_call:
+
+# Closes PRs that had changes requested and then went quiet.
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        with:
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          days-before-pr-stale: 14
+          days-before-pr-close: 7
+          only-pr-labels: changes-requested
+          stale-pr-message: No activity for 14 days since changes were requested. This closes in 7 days unless updated.
+          close-pr-message: Closed because requested changes were not made. Reopen once they are.
