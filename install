@@ -3,7 +3,7 @@
 # Usage: curl -fsSL https://raw.githubusercontent.com/blackhat-7/maintainer/main/install | bash
 set -euo pipefail
 
-VERSION=v0.1.1
+VERSION=v0.1.2
 RAW=https://raw.githubusercontent.com/blackhat-7/maintainer/$VERSION/template
 FILES=(
   .github/workflows/maintainer.yml
