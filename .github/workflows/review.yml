@@ -20,7 +20,6 @@ jobs:
     env:
       GH_REPO: ${{ github.repository }}
       PR: ${{ github.event.pull_request.number }}
-      BASE: ${{ github.event.pull_request.base.sha }}
       ASSOC: ${{ github.event.pull_request.author_association }}
     steps:
       - name: Check token
@@ -36,8 +35,8 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.token.outputs.ok
+        # No ref: pull_request_target checks out the base branch tip, so the rules are current.
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -48,16 +47,17 @@ jobs:
         run: |
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           git -c "http.extraheader=AUTHORIZATION: basic $auth" fetch -q --no-tags origin "refs/pull/$PR/head"
+          base=$(git rev-parse HEAD)
           head=$(git rev-parse FETCH_HEAD)
           echo "HEAD_SHA=$head" >> "$GITHUB_ENV"
           # Symlinks become plain files, so nothing in the checkout points outside it.
           git -c core.symlinks=false worktree add -q --detach "$RUNNER_TEMP/head" "$head"
-          git diff -U20 "$BASE...$head" > "$RUNNER_TEMP/diff"
+          git diff -U20 "$base...$head" > "$RUNNER_TEMP/diff"
 
           verdict() {
             jq -n --arg s "$1" '{decision: "request_changes", summary: $s, comments: []}' > "$RUNNER_TEMP/verdict.json"
           }
-          if [ "$ASSOC" != OWNER ] && git diff --name-only "$BASE...$head" | grep -qE '^\.(github|claude|maintainer)/'; then
+          if [ "$ASSOC" != OWNER ] && git diff --name-only "$base...$head" | grep -qE '^\.(github|claude|maintainer)/'; then
             verdict 'Changes to `.github/`, `.claude/` and `.maintainer/` are maintainer-only. Remove them from this PR.'
           elif [ "$(wc -c < "$RUNNER_TEMP/diff")" -gt 300000 ]; then
             verdict 'Too large to review. Split this into smaller PRs, one concern each.'
