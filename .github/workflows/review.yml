@@ -21,6 +21,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
       PR: ${{ github.event.pull_request.number }}
       ASSOC: ${{ github.event.pull_request.author_association }}
+      AUTHOR: ${{ github.event.pull_request.user.login }}
     steps:
       - name: Check token
         id: token
@@ -52,15 +53,33 @@ jobs:
           echo "HEAD_SHA=$head" >> "$GITHUB_ENV"
           # Symlinks become plain files, so nothing in the checkout points outside it.
           git -c core.symlinks=false worktree add -q --detach "$RUNNER_TEMP/head" "$head"
-          git diff -U20 "$base...$head" > "$RUNNER_TEMP/diff"
+          # Lockfiles are generated: left out of the size count and of the diff Claude sees.
+          skip=(':!*.lock' ':!*-lock.json' ':!*-lock.yaml' ':!go.sum')
+          git diff -U20 "$base...$head" -- "${skip[@]}" > "$RUNNER_TEMP/diff"
+          lines=$(git diff --numstat "$base...$head" -- "${skip[@]}" | awk '{n += $1 + $2} END {print n + 0}')
+
+          trusted=false
+          [[ "$ASSOC" =~ ^(OWNER|MEMBER|COLLABORATOR)$ ]] && trusted=true
+          max_lines=1500
+          $trusted && max_lines=5000
+          reviews=$(gh api --paginate "repos/$GH_REPO/pulls/$PR/reviews" \
+            -q '.[] | select(.user.login == "github-actions[bot]") | .id' | wc -l)
+          open=$(gh pr list --author "$AUTHOR" --state open --limit 100 --json number -q length)
 
           verdict() {
-            jq -n --arg s "$1" '{decision: "request_changes", summary: $s, comments: []}' > "$RUNNER_TEMP/verdict.json"
+            jq -n --arg d "$1" --arg s "$2" '{decision: $d, summary: $s, comments: []}' > "$RUNNER_TEMP/verdict.json"
           }
-          if [ "$ASSOC" != OWNER ] && git diff --name-only "$base...$head" | grep -qE '^\.(github|claude|maintainer)/'; then
-            verdict 'Changes to `.github/`, `.claude/` and `.maintainer/` are maintainer-only. Remove them from this PR.'
-          elif [ "$(wc -c < "$RUNNER_TEMP/diff")" -gt 300000 ]; then
-            verdict 'Too large to review. Split this into smaller PRs, one concern each.'
+          if [ "$ASSOC" != OWNER ] && [ "$reviews" -ge 10 ]; then
+            if ! gh pr view "$PR" --json labels -q '.labels[].name' | grep -qx needs-maintainer; then
+              gh pr edit "$PR" --add-label needs-maintainer
+              gh pr comment "$PR" --body 'This PR reached the limit of 10 automated reviews. A maintainer will take it from here.'
+            fi
+          elif [ "$ASSOC" != OWNER ] && git diff --name-only "$base...$head" | grep -qE '^\.(github|claude|maintainer)/'; then
+            verdict request_changes 'Changes to `.github/`, `.claude/` and `.maintainer/` are maintainer-only. Remove them from this PR.'
+          elif ! $trusted && [ "$open" -gt 3 ]; then
+            verdict close "You have $open open PRs here. Get those merged or closed before opening more."
+          elif [ "$lines" -gt "$max_lines" ]; then
+            verdict request_changes "This PR changes $lines lines, over the limit of $max_lines. Split it into smaller PRs that each land on their own."
           else
             {
               cat .maintainer/REVIEW.md .maintainer/STANDARDS.md
@@ -102,6 +121,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           v="$RUNNER_TEMP/verdict.json"
+          [ -f "$v" ] || exit 0
           decision=$(jq -r .decision "$v")
           event=$(jq -rn --arg d "$decision" '{approve: "APPROVE", request_changes: "REQUEST_CHANGES", close: "COMMENT"}[$d]')
           review() { gh api "repos/$GH_REPO/pulls/$PR/reviews" --input - > /dev/null; }

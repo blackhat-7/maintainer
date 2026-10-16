@@ -3,7 +3,7 @@
 # Usage: curl -fsSL https://raw.githubusercontent.com/blackhat-7/maintainer/main/install | bash
 set -euo pipefail
 
-VERSION=v0.1.4
+VERSION=v0.1.5
 RAW=https://raw.githubusercontent.com/blackhat-7/maintainer/$VERSION/template
 FILES=(
   .github/workflows/maintainer.yml
@@ -50,6 +50,8 @@ block "$owners" '# maintainer:start' '# maintainer:end' \
 gh repo edit "$repo" --enable-auto-merge > /dev/null || warn "could not enable auto-merge"
 gh label create changes-requested -R "$repo" --force --color d93f0b \
   --description "Waiting on the author. Closed if inactive." > /dev/null || warn "could not create label"
+gh label create needs-maintainer -R "$repo" --force --color fbca04 \
+  --description "Out of automated reviews. Needs a human." > /dev/null || warn "could not create label"
 
 perms=$(gh api "repos/$repo/actions/permissions/workflow" -q .default_workflow_permissions) &&
   gh api -X PUT "repos/$repo/actions/permissions/workflow" \

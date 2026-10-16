@@ -31,7 +31,7 @@ Rerun the install command. It overwrites the managed files and leaves the rest o
 | `.maintainer/` | Standards and review rules. Edit the review rules here to tune the reviewer. |
 | `.claude/skills/open-pr/` | Self-review and open a PR in the right format. |
 | `CLAUDE.md`, `AGENTS.md`, `CODEOWNERS` | A marked block. Your own content is kept. |
-| Repo settings | Auto-merge on. Actions may approve PRs. A `changes-requested` label. A `maintainer` ruleset: PRs need one approval, plus yours for `.github/`, `.claude/` and `.maintainer/`. Admins can bypass. |
+| Repo settings | Auto-merge on. Actions may approve PRs. `changes-requested` and `needs-maintainer` labels. A `maintainer` ruleset: PRs need one approval, plus yours for `.github/`, `.claude/` and `.maintainer/`. Admins can bypass. |
 
 Make your CI a required status check in the ruleset, so auto-merge waits for it.
 
@@ -44,6 +44,14 @@ Limits that a prompt injection can't get past:
 - PRs from outsiders are never auto-merged.
 - Changes to `.github/`, `.claude/` or `.maintainer/` by anyone but the owner are rejected before Claude sees them.
 - The merge is pinned to the reviewed commit.
+
+Limits, checked before Claude runs so they cost nothing:
+
+| | Outsiders | Collaborators | Owner |
+|---|---|---|---|
+| Changed lines (lockfiles excluded) | 1,500 | 5,000 | 5,000 |
+| Claude reviews per PR | 10 | 10 | no limit |
+| Open PRs at once | 3 | no limit | no limit |
 
 ## Releasing
 
